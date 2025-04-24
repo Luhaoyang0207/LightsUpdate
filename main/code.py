@@ -14,8 +14,8 @@ import supervisor
 
 # Current firmware version (bump on each release)
 CURRENT_VERSION = "0.1.0"
-# Point OTA at your public GitHub raw manifest
-MANIFEST_URL    = "https://raw.githubusercontent.com/Luhaoyang0207/LightsUpdate/main/firmware.json"
+# Point OTA at a public HTTP manifest via raw.githack.com (no SSL required)
+MANIFEST_URL    = "http://raw.githack.com/Luhaoyang0207/LightsUpdate/main/firmware.json"
 
 # Initialize Ethernet
 spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
@@ -33,6 +33,7 @@ eth.ifconfig = (
 print("Static IP:", eth.pretty_ip(eth.ifconfig[0]))
 
 pool    = socketpool.SocketPool(eth)
+# Use HTTP (no TLS), so ssl_context=None
 requests = adafruit_requests.Session(pool, ssl_context=None)
 
 # OTA check function
@@ -92,42 +93,31 @@ pwr.direction = digitalio.Direction.OUTPUT
 pwr.value     = True
 
 # Animation states
-IDLE_STATE    = "idle"
-SUCCESS_STATE = "success"
-FAILED_STATE  = "failed"
-current_state = IDLE_STATE  # Default to idle
-
-# Brightness and color utilities
-def dynamic_brightness(t, min_brightness=0.2, max_brightness=1):
-    brightness_factor = (math.sin(t * math.pi / 5) + 1) / 2
-    return min_brightness + (max_brightness - min_brightness) * brightness_factor
-
-def interpolate_color(c1, c2, factor):
-    return (
-        int(c1[0] + (c2[0] - c1[0]) * factor),
-        int(c1[1] + (c2[1] - c1[1]) * factor),
-        int(c1[2] + (c2[2] - c1[2]) * factor),
-        int(c1[3] + (c2[3] - c1[3]) * factor)
-    )
-
-def color_with_brightness(t):
-    transition = (t % 5) / 5
-    brightness = dynamic_brightness(t)
-    if t < 5:
-        color = interpolate_color((255,255,255,255), (0,0,255,0), transition)
-    elif t < 10:
-        color = interpolate_color((0,0,255,0), (0,255,0,0), (t-5)/5)
-    else:
-        color = interpolate_color((0,255,0,0), (255,255,255,255), (t-10)/5)
-    return tuple(int(c * brightness) for c in color)
-
-# Main animation loop
 def handle_animation():
-    if current_state == IDLE_STATE:
-        t = time.monotonic() % 15
-        strip.fill(color_with_brightness(t))
-        strip.show()
-        time.sleep(0.01)
+    t = time.monotonic() % 15
+    brightness = (math.sin(t * math.pi / 5) + 1) / 2
+    # Simple white-to-blue-to-green fade
+    transition = (t % 5) / 5
+    if t < 5:
+        r_color = (255, 255, 255)
+        g_color = (0, 0, 255)
+    elif t < 10:
+        r_color = (0, 0, 255)
+        g_color = (0, 255, 0)
+        transition = (t - 5) / 5
+    else:
+        r_color = (0, 255, 0)
+        g_color = (255, 255, 255)
+        transition = (t - 10) / 5
+    # Linear interpolate channel-wise
+    color = tuple(int(r_color[i] + (g_color[i] - r_color[i]) * transition) for i in range(3))
+    # Apply brightness
+    color = tuple(int(c * brightness) for c in color)
+    # Fill strip
+    strip.fill(color)
+    strip.show()
+    time.sleep(0.01)
 
+# Main loop
 while True:
     handle_animation()
