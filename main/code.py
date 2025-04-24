@@ -13,7 +13,7 @@ import storage
 import supervisor
 
 # Current firmware version (bump on each release)
-CURRENT_VERSION = "0.1.0"
+CURRENT_VERSION = "0.1.1"
 # Public HTTP manifest URL (no SSL required)
 MANIFEST_URL = "http://raw.githack.com/Luhaoyang0207/LightsUpdate/main/main/firmware.json"
 
@@ -23,15 +23,7 @@ cs = digitalio.DigitalInOut(board.D10)
 eth = wiznet.WIZNET5K(spi, cs)
 print("Ethernet IP:", eth.pretty_ip(eth.ifconfig[0]))
 
-# Optional: static IP for known subnet
-# eth.ifconfig = (
-#    (192, 168, 2, 50),  # static IP
-#    (255, 255, 255, 0),  # netmask
-#    (192, 168, 2, 1),    # gateway
-#    (8, 8, 8, 8),        # DNS
-# )
-
-# Create HTTP session (HTTP only, no TLS)
+# Create HTTP session (no TLS)
 pool = socketpool.SocketPool(eth)
 requests = adafruit_requests.Session(pool, ssl_context=None)
 
@@ -47,7 +39,8 @@ def check_for_update():
         remote_ver = meta.get("version", "")
         if remote_ver != CURRENT_VERSION:
             print(f"OTA: New version {remote_ver} available (you have {CURRENT_VERSION})")
-            code_resp = requests.get(meta.get("url", ""))
+            code_url = meta.get("url", "")
+            code_resp = requests.get(code_url)
             if code_resp.status_code == 200:
                 new_code = code_resp.text
                 storage.remount('/', False)
@@ -76,8 +69,10 @@ check_for_update()
 NUM_PIXELS = 192
 NEOPIXEL_PIN = board.EXTERNAL_NEOPIXELS
 strip = neopixel.NeoPixel(
-    NEOPIXEL_PIN, NUM_PIXELS,
-    brightness=1, auto_write=True,
+    NEOPIXEL_PIN,
+    NUM_PIXELS,
+    brightness=1,
+    auto_write=True,
     pixel_order=neopixel.GRBW
 )
 strip.fill(0)
@@ -95,17 +90,15 @@ def handle_animation():
     segment = int(t // 5)
     frac = (t % 5) / 5
     if segment == 0:
-        start = (255,255,255)
-        end   = (0,0,255)
+        start = (255, 255, 255)
+        end = (0, 0, 255)
     elif segment == 1:
-        start = (0,0,255)
-        end   = (0,255,0)
+        start = (0, 0, 255)
+        end = (0, 255, 0)
     else:
-        start = (0,255,0)
-        end   = (255,255,255)
-    # interpolate colors
+        start = (0, 255, 0)
+        end = (255, 255, 255)
     color = tuple(int(start[i] + (end[i] - start[i]) * frac) for i in range(3))
-    # apply brightness
     color = tuple(int(c * brightness) for c in color)
     strip.fill(color)
     strip.show()
