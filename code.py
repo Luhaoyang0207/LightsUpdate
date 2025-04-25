@@ -13,7 +13,7 @@ import adafruit_wiznet5k.adafruit_wiznet5k as wiznet
 import adafruit_requests
 
 # Current firmware version (bump on each release)
-CURRENT_VERSION = "0.1.0"
+CURRENT_VERSION = "0.1.1"
 # Public HTTP manifest URL (no SSL required)
 MANIFEST_URL = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/firmware.json"
 
