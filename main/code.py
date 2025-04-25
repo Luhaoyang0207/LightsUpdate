@@ -13,7 +13,7 @@ import storage
 import supervisor
 
 # Current firmware version (bump on each release)
-CURRENT_VERSION = "0.1.1"
+CURRENT_VERSION = "0.1.0"
 # Public HTTP manifest URL (no SSL required)
 MANIFEST_URL = "http://raw.githack.com/Luhaoyang0207/LightsUpdate/main/main/firmware.json"
 
