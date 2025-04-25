@@ -4,13 +4,13 @@ import busio
 import digitalio
 import neopixel
 import math
+import storage
+import supervisor
 
 # --- Networking & OTA Setup ---
 import adafruit_wiznet5k.adafruit_wiznet5k_socketpool as socketpool
 import adafruit_wiznet5k.adafruit_wiznet5k as wiznet
 import adafruit_requests
-import storage
-import supervisor
 
 # Current firmware version (bump on each release)
 CURRENT_VERSION = "0.1.0"
@@ -35,21 +35,25 @@ def check_for_update():
         if r.status_code != 200:
             print("OTA: manifest fetch failed:", r.status_code)
             return
-        meta = r.json()
-        remote_ver = meta.get("version", "")
+        manifest = r.json()
+        remote_ver = manifest.get("version", "")
         if remote_ver != CURRENT_VERSION:
             print(f"OTA: New version {remote_ver} available (you have {CURRENT_VERSION})")
-            code_url = meta.get("url", "")
+            # Ensure HTTP-only URL
+            code_url = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/code.py"
             code_resp = requests.get(code_url)
             if code_resp.status_code == 200:
                 new_code = code_resp.text
+                storage.disable_usb_drive()
                 storage.remount('/', False)
                 with open('/code.py', 'w') as f:
                     f.write(new_code)
                 storage.remount('/', True)
+                storage.enable_usb_drive()
                 print("OTA: Update written. Reloading…")
                 time.sleep(1)
                 supervisor.reload()
+
             else:
                 print("OTA: code download failed:", code_resp.status_code)
         else:
@@ -65,6 +69,8 @@ def check_for_update():
 # Run OTA on boot
 check_for_update()
 
+storage.enable_usb_drive()
+
 # --- NeoPixel Animation Setup ---
 NUM_PIXELS = 192
 NEOPIXEL_PIN = board.EXTERNAL_NEOPIXELS
@@ -79,9 +85,9 @@ strip.fill(0)
 strip.show()
 
 # Power on external strip via FET
-pwr = digitalio.DigitalInOut(board.EXTERNAL_POWER)
-pwr.direction = digitalio.Direction.OUTPUT
-pwr.value = True
+enable = digitalio.DigitalInOut(board.EXTERNAL_POWER)
+enable.direction = digitalio.Direction.OUTPUT
+enable.value = True
 
 # Animation loop: smooth white→blue→green fade
 def handle_animation():
