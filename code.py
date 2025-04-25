@@ -70,6 +70,9 @@ def check_for_update():
 check_for_update()
 
 storage.enable_usb_drive()
+print("USB drive re-enabled, soft-reloading…")
+time.sleep(0.5)
+supervisor.reload()
 # --- NeoPixel Animation Setup ---
 NUM_PIXELS = 192
 NEOPIXEL_PIN = board.EXTERNAL_NEOPIXELS
