@@ -12,7 +12,7 @@ import adafruit_wiznet5k.adafruit_wiznet5k as wiznet
 import adafruit_requests
 
 # ————— CONFIGURATION —————
-CURRENT_VERSION = "0.1.0"
+CURRENT_VERSION = "0.1.1"
 MANIFEST_URL    = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/firmware.json"
 CODE_URL        = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/code.py"
 # ————————————————
