@@ -7,27 +7,26 @@ import math
 import storage
 import supervisor
 
-# --- Networking & OTA Setup ---
 import adafruit_wiznet5k.adafruit_wiznet5k_socketpool as socketpool
 import adafruit_wiznet5k.adafruit_wiznet5k as wiznet
 import adafruit_requests
 
-# Current firmware version (bump on each release)
-CURRENT_VERSION = "0.1.1"
-# Public HTTP manifest URL (no SSL required)
-MANIFEST_URL = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/firmware.json"
+# ————— CONFIGURATION —————
+CURRENT_VERSION = "0.1.0"
+MANIFEST_URL    = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/firmware.json"
+CODE_URL        = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/code.py"
+# ————————————————
 
-# Initialize Ethernet over WIZnet5K (DHCP)
+# Initialize Ethernet
 spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
-cs = digitalio.DigitalInOut(board.D10)
+cs  = digitalio.DigitalInOut(board.D10)
 eth = wiznet.WIZNET5K(spi, cs)
 print("Ethernet IP:", eth.pretty_ip(eth.ifconfig[0]))
 
-# Create HTTP session (no TLS)
-pool = socketpool.SocketPool(eth)
+# HTTP session (no TLS)
+pool     = socketpool.SocketPool(eth)
 requests = adafruit_requests.Session(pool, ssl_context=None)
 
-# OTA check and update function
 def check_for_update():
     print("OTA: Checking for update…")
     try:
@@ -35,27 +34,24 @@ def check_for_update():
         if r.status_code != 200:
             print("OTA: manifest fetch failed:", r.status_code)
             return
-        manifest = r.json()
-        remote_ver = manifest.get("version", "")
+        meta       = r.json()
+        remote_ver = meta.get("version", "")
         if remote_ver != CURRENT_VERSION:
             print(f"OTA: New version {remote_ver} available (you have {CURRENT_VERSION})")
-            # Ensure HTTP-only URL
-            code_url = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/code.py"
-            code_resp = requests.get(code_url)
-            if code_resp.status_code == 200:
-                new_code = code_resp.text
-                storage.disable_usb_drive()
-                storage.remount('/', False)
-                with open('/code.py', 'w') as f:
+            # Fetch the new code.py
+            resp = requests.get(CODE_URL)
+            if resp.status_code == 200:
+                new_code = resp.text
+                # Remount flash read-write, write new code.py, remount read-only
+                storage.remount("/", False)
+                with open("/code.py", "w") as f:
                     f.write(new_code)
-                storage.remount('/', True)
-                storage.enable_usb_drive()
+                storage.remount("/", True)
                 print("OTA: Update written. Reloading…")
                 time.sleep(1)
-                supervisor.reload()
-
+                supervisor.reload()  # soft‐reload into the new script
             else:
-                print("OTA: code download failed:", code_resp.status_code)
+                print("OTA: code download failed:", resp.status_code)
         else:
             print("OTA: Already up to date.")
     except Exception as e:
@@ -66,56 +62,44 @@ def check_for_update():
         except:
             pass
 
-# Run OTA on boot
+# Run the OTA check on every cold boot
 check_for_update()
 
-storage.enable_usb_drive()
-<<<<<<< HEAD
-
-=======
-print("USB drive re-enabled, soft-reloading…")
-time.sleep(0.5)
-supervisor.reload()
->>>>>>> 16e1b84f71e39cb473798cc0f6cb6b10ea3a5ce2
-# --- NeoPixel Animation Setup ---
+# ————— NeoPixel Animation —————
 NUM_PIXELS = 192
-NEOPIXEL_PIN = board.EXTERNAL_NEOPIXELS
 strip = neopixel.NeoPixel(
-    NEOPIXEL_PIN,
-    NUM_PIXELS,
-    brightness=1,
-    auto_write=True,
-    pixel_order=neopixel.GRBW
+    board.EXTERNAL_NEOPIXELS, NUM_PIXELS,
+    brightness=1, auto_write=True, pixel_order=neopixel.GRBW
 )
-strip.fill(0)
+strip.fill((0,0,0))
 strip.show()
 
-# Power on external strip via FET
-enable = digitalio.DigitalInOut(board.EXTERNAL_POWER)
-enable.direction = digitalio.Direction.OUTPUT
-enable.value = True
+# Power on external strip
+pwr = digitalio.DigitalInOut(board.EXTERNAL_POWER)
+pwr.direction = digitalio.Direction.OUTPUT
+pwr.value     = True
 
-# Animation loop: smooth white→blue→green fade
-def handle_animation():
-    t = time.monotonic() % 15
-    brightness = (math.sin(t * math.pi / 5) + 1) / 2
-    segment = int(t // 5)
+def dynamic_brightness(t, lo=0.2, hi=1.0):
+    f = (math.sin(t * math.pi/5) + 1) / 2
+    return lo + (hi - lo) * f
+
+def interpolate(c1, c2, f):
+    return tuple(int(c1[i] + (c2[i] - c1[i]) * f) for i in range(4))
+
+def color_with_brightness(t):
+    seg  = int(t // 5)
     frac = (t % 5) / 5
-    if segment == 0:
-        start = (255, 255, 255)
-        end = (0, 0, 255)
-    elif segment == 1:
-        start = (0, 0, 255)
-        end = (0, 255, 0)
+    if seg == 0:
+        base = interpolate((255,255,255,255), (0,0,255,0), frac)
+    elif seg == 1:
+        base = interpolate((0,0,255,0), (0,255,0,0), frac)
     else:
-        start = (0, 255, 0)
-        end = (255, 255, 255)
-    color = tuple(int(start[i] + (end[i] - start[i]) * frac) for i in range(3))
-    color = tuple(int(c * brightness) for c in color)
-    strip.fill(color)
+        base = interpolate((0,255,0,0), (255,255,255,255), frac)
+    b = dynamic_brightness(t)
+    return tuple(int(c * b) for c in base)
+
+while True:
+    t = time.monotonic() % 15
+    strip.fill(color_with_brightness(t))
     strip.show()
     time.sleep(0.01)
-
-# Main loop
-while True:
-    handle_animation()
