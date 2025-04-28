@@ -13,7 +13,7 @@ import adafruit_wiznet5k.adafruit_wiznet5k as wiznet
 import adafruit_requests
 
 # Current firmware version (bump on each release)
-CURRENT_VERSION = "0.1.0"
+CURRENT_VERSION = "0.1.1"
 # Public HTTP manifest URL (no SSL required)
 MANIFEST_URL = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/firmware.json"
 
@@ -70,7 +70,13 @@ def check_for_update():
 check_for_update()
 
 storage.enable_usb_drive()
+<<<<<<< HEAD
 
+=======
+print("USB drive re-enabled, soft-reloading…")
+time.sleep(0.5)
+supervisor.reload()
+>>>>>>> 16e1b84f71e39cb473798cc0f6cb6b10ea3a5ce2
 # --- NeoPixel Animation Setup ---
 NUM_PIXELS = 192
 NEOPIXEL_PIN = board.EXTERNAL_NEOPIXELS
