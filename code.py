@@ -13,8 +13,8 @@ import adafruit_requests
 
 # ————— CONFIGURATION —————
 CURRENT_VERSION = "0.1.2"
-MANIFEST_URL    = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/firmware.json"
-CODE_URL        = "http://rawcdn.githack.com/Luhaoyang0207/LightsUpdate/main/code.py"
+MANIFEST_URL    = "http://cdn.staticaly.com/gh/Luhaoyang0207/LightsUpdate/main/firmware.json"
+CODE_URL        = "http://cdn.staticaly.com/gh/Luhaoyang0207/LightsUpdate/main/code.py"
 # ————————————————————————
 
 # 1) Bring up Ethernet
