@@ -1,5 +1,5 @@
-# LightsUpdate
-Light Update for LibertyNow access controll 
+Light for access-controll, more visable for user to see where the POS terminal are
+With use of MQTT can the light be change in multiple states
 
 # Components
 RP2040 Propmaker Feather
