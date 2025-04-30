@@ -4,109 +4,142 @@ import busio
 import digitalio
 import neopixel
 import math
-import storage
-import supervisor
 
-import adafruit_wiznet5k.adafruit_wiznet5k_socketpool as socketpool
+# Networking & MQTT (WIZnet5K)
 import adafruit_wiznet5k.adafruit_wiznet5k as wiznet
-import adafruit_requests
+import adafruit_wiznet5k.adafruit_wiznet5k_socketpool as socketpool
+import adafruit_minimqtt.adafruit_minimqtt as MQTT
 
-# ————— CONFIGURATION —————
-CURRENT_VERSION = "0.1.2"
-MANIFEST_URL    = "http://cdn.staticaly.com/gh/Luhaoyang0207/LightsUpdate/main/firmware.json"
-CODE_URL        = "http://cdn.staticaly.com/gh/Luhaoyang0207/LightsUpdate/main/code.py"
-# ————————————————————————
+# LED Animation
+from adafruit_led_animation.animation.solid import Solid
 
-# 1) Bring up Ethernet
-spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
-cs  = digitalio.DigitalInOut(board.D10)
-eth = wiznet.WIZNET5K(spi, cs)
-print("Ethernet IP:", eth.pretty_ip(eth.ifconfig[0]))
+# ---------------- Configuration ----------------
+NUM_PIXELS      = 192
+PIN_PIXELS      = board.EXTERNAL_NEOPIXELS
+MIN_IDLE_BRT    = 0.2
+MAX_IDLE_BRT    = 1.0
 
-# 2) HTTP session (no TLS)
-pool     = socketpool.SocketPool(eth)
-requests = adafruit_requests.Session(pool, ssl_context=None)
+IDLE_STATE      = "idle"
+SUCCESS_STATE   = "success"
+FAILED_STATE    = "failed"
+ERROR_PIN_STATE = "error_pin"
 
-def check_for_update():
-    print("OTA: Checking for update…")
-    try:
-        r = requests.get(MANIFEST_URL)
-        if r.status_code != 200:
-            print("OTA: manifest fetch failed:", r.status_code)
-            return
-        meta = r.json()
-        remote = meta.get("version", "")
-        if remote != CURRENT_VERSION:
-            print(f"OTA: New version {remote} available (you have {CURRENT_VERSION})")
-            # download new code.py
-            resp = requests.get(CODE_URL)
-            if resp.status_code == 200:
-                new_code = resp.text
-                # remount RW, overwrite code.py
-                storage.remount("/", False)
-                with open("/code.py", "w") as f:
-                    f.write(new_code)
-                # overwrite boot.py with a no-op stub so USB comes back on next cold boot
-                with open("/boot.py", "w") as f:
-                    f.write("# boot.py stub — USB will stay enabled\n")
-                storage.remount("/", True)
-                print("OTA: Update written. Soft-reloading…")
-                time.sleep(1)
-                supervisor.reload()
-            else:
-                print("OTA: code.py download failed:", resp.status_code)
-        else:
-            print("OTA: Already up to date.")
-    except Exception as e:
-        print("OTA Error:", e)
-    finally:
-        try:
-            r.close()
-        except:
-            pass
+MQTT_BROKER     = "192.168.51.67"  # your broker IP
+MQTT_PORT       = 1883
+MQTT_TOPIC      = "lights/control"
 
-# Run the OTA check once on boot
-check_for_update()
-
-# If we fall through here, USB is now visible (boot.py stub ran on this soft-reload)
-print("CIRCUITPY visible — you may now open/edit code.py")
-
-# ————— NeoPixel Animation —————
-NUM_PIXELS = 192
-strip = neopixel.NeoPixel(
-    board.EXTERNAL_NEOPIXELS, NUM_PIXELS,
-    brightness=1, auto_write=True, pixel_order=neopixel.GRBW
+# Optional static IP (comment out to use DHCP)
+STATIC_IFCONFIG = (
+    (192, 168, 51, 200),  # board’s static IP
+    (255, 255, 255, 0),   # subnet mask
+    (192, 168, 51, 1),    # gateway
+    (8, 8, 8, 8)          # DNS
 )
-strip.fill((0, 0, 0))
-strip.show()
 
-# Power on external strip via FET
-pwr = digitalio.DigitalInOut(board.EXTERNAL_POWER)
-pwr.direction = digitalio.Direction.OUTPUT
-pwr.value     = True
+# ---------------- Setup ----------------
+# NeoPixel strip
+strip = neopixel.NeoPixel(
+    PIN_PIXELS,
+    NUM_PIXELS,
+    brightness=MIN_IDLE_BRT,
+    auto_write=False,
+    pixel_order=neopixel.GRBW
+)
+# Power gate for external strip
+power = digitalio.DigitalInOut(board.EXTERNAL_POWER)
+power.direction = digitalio.Direction.OUTPUT
+power.value = True
 
-def dynamic_brightness(t, lo=0.2, hi=1.0):
-    f = (math.sin(t * math.pi/5) + 1) / 2
-    return lo + (hi - lo) * f
+# Solid animations for non-idle states
+success_anim   = Solid(strip, color=(0, 255, 0, 0))
+failed_anim    = Solid(strip, color=(255, 0, 0, 0))
+error_pin_anim = Solid(strip, color=(255, 255, 0, 0))
 
-def interpolate(c1, c2, f):
+# ---------------- Helper Functions ----------------
+def dynamic_brightness(t):
+    # Sinusoidal oscillation between MIN_IDLE_BRT and MAX_IDLE_BRT over 40s
+    factor = (math.sin(t * math.pi / 20) + 1) / 2
+    return MIN_IDLE_BRT + (MAX_IDLE_BRT - MIN_IDLE_BRT) * factor
+
+
+def interpolate_color(c1, c2, f):
     return tuple(int(c1[i] + (c2[i] - c1[i]) * f) for i in range(4))
 
-def color_with_brightness(t):
-    seg  = int(t // 5)
-    frac = (t % 5) / 5
-    frac = (t % 5) / 5
-    if seg == 0:
-        base = interpolate((255,255,255,255), (0,0,255,0), frac)
-    elif seg == 1:
-        base = interpolate((0,0,255,0), (0,255,0,0), frac)
-    else:
-        base = interpolate((0,255,0,0), (255,255,255,255), frac)
-    b = dynamic_brightness(t)
-    return tuple(int(c * b) for c in base)
 
+def color_with_brightness(t):
+    # Extended 60s cycle: white→blue→green→white with fading brightness
+    phase_time = t % 45
+    transition = (phase_time % 20) / 20
+    brightness = dynamic_brightness(t)
+
+    if phase_time < 20:  # white→blue over 20s
+        base = interpolate_color((255,255,255,255), (0,0,255,0), transition)
+    elif phase_time < 40:  # blue→green over next 20s
+        base = interpolate_color((0,0,255,0), (0,255,0,0), transition)
+    else:  # green→white over final 20s
+        base = interpolate_color((0,255,0,0), (255,255,255,255), transition)
+
+    return tuple(int(c * brightness) for c in base)
+
+# ---------------- State ----------------
+current_state = IDLE_STATE
+
+def mqtt_message(client, topic, msg):
+    global current_state
+    print(f"Received on {topic}: {msg}")
+    current_state = msg
+    strip.brightness = MAX_IDLE_BRT if msg in (SUCCESS_STATE, FAILED_STATE, ERROR_PIN_STATE) else MIN_IDLE_BRT
+
+# ---------------- Network Setup ----------------
+cs  = digitalio.DigitalInOut(board.D10)
+spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
+eth = wiznet.WIZNET5K(spi, cs)
+eth.ifconfig = STATIC_IFCONFIG  # comment out for DHCP
+print("IP =", eth.pretty_ip(eth.ifconfig[0]))
+pool = socketpool.SocketPool(eth)
+
+# ---------------- MQTT Setup ----------------
+mqtt_client = MQTT.MQTT(
+    broker=MQTT_BROKER,
+    port=MQTT_PORT,
+    socket_pool=pool
+)
+# shorten the internal socket timeout so loop can poll quickly for smooth animations
+mqtt_client.socket_timeout = 0.02
+mqtt_client.on_message = mqtt_message
+
+# Raw TCP test
+sock = pool.socket()
+try:
+    sock.connect((MQTT_BROKER, MQTT_PORT))
+    print("✅ TCP to broker OK!")
+except Exception as e:
+    print("❌ TCP connect failed:", e)
+finally:
+    sock.close()
+
+mqtt_client.connect()
+mqtt_client.subscribe(MQTT_TOPIC)
+print("Subscribed →", MQTT_TOPIC)
+
+# ---------------- Main Loop ----------------
 while True:
-    t = time.monotonic() % 15
-    strip.fill(color_with_brightness(t))
-    strip.show()
-    time.sleep(0.01)
+    # Drive animation continuously for smooth idle fade
+    t = time.monotonic()
+    if current_state == IDLE_STATE:
+        strip.fill(color_with_brightness(t))
+        strip.show()
+    elif current_state == SUCCESS_STATE:
+        success_anim.animate()
+    elif current_state == FAILED_STATE:
+        failed_anim.animate()
+    elif current_state == ERROR_PIN_STATE:
+        error_pin_anim.animate()
+    # Short sleep for animation frame
+    time.sleep(0.02)
+    # Poll MQTT with at least 1s timeout to avoid loop-timeout errors
+    try:
+        mqtt_client.loop(timeout=1)
+    except Exception as e:
+        print("MQTT error, reconnecting…", e)
+        mqtt_client.connect()
